@@ -323,7 +323,7 @@ const CFG={GAME_MIN:10,Q_SEC:12, /* v10: ค่าสำรอง — เวล�
  TURN:[{"urls":"stun:stun.relay.metered.ca:80"},{"urls":"turn:global.relay.metered.ca:80","username":"c19080c45b2d51d887df7e61","credential":"HwJOBIxVfovGaMPi"},{"urls":"turn:global.relay.metered.ca:80?transport=tcp","username":"c19080c45b2d51d887df7e61","credential":"HwJOBIxVfovGaMPi"},{"urls":"turn:global.relay.metered.ca:443","username":"c19080c45b2d51d887df7e61","credential":"HwJOBIxVfovGaMPi"},{"urls":"turns:global.relay.metered.ca:443?transport=tcp","username":"c19080c45b2d51d887df7e61","credential":"HwJOBIxVfovGaMPi"}],           // TURN แบบกำหนดเอง: object หรือ array เช่น [{urls:'turns:xxx:443',username:'u',credential:'p'}]
  /* v8: ★ สำคัญสำหรับเครือข่ายบริษัท ★ วาง URL API ของ Metered Open Relay (ฟรี) ที่นี่ แล้วทั้ง Host และผู้เล่นจะได้ TURN อัตโนมัติ
     รูปแบบ: 'https://<ชื่อแอป>.metered.live/api/v1/turn/credentials?apiKey=<API_KEY>'  (สมัครฟรีที่ metered.ca) */
- TURN_API:'https://your_app.metered.live/api/v1/turn/credentials?apiKey=a991f9bca9c45a769f1c1b18437c89a5f542',
+ TURN_API:'',
  CONNECT_TIMEOUT_MS:15000 // v8: รอเชื่อมเครื่อง Host นานสุด (ผ่าน TURN อาจช้ากว่าปกติ)
 };
 /* v8: ดึง TURN จาก API ก่อนสร้างการเชื่อมต่อ (ถ้าไม่ได้ตั้งค่าไว้จะข้ามไป) */
