@@ -308,6 +308,10 @@ input.code-in{width:min(240px,80vw);font-size:clamp(30px,9vw,40px);letter-spacin
 @keyframes sweep{0%{left:-60%}55%,100%{left:130%}}
 @media(prefers-reduced-motion:reduce){.imgfx,.imgfx>img,.imgfx::before,.imgfx .shine::before{animation:none}}
 @media(max-width:900px){.qrow>.imgfx{order:-1;width:min(100%,420px)}.qrow>.imgfx>.qimg{width:100%}.qrow>.imgfx.sm{width:min(60%,260px)}}
+/* ===== v13 ===== */
+.rsbox{max-width:640px;width:100%;text-align:left;border-color:#4ade80!important;box-shadow:0 0 24px rgba(74,222,128,.35)!important;font-size:15px;line-height:1.6}
+.rsbtn{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.chip.lk{cursor:pointer}.chip.lk:hover{outline:2px dashed #fde68a}
 </style>
 </head>
 <body>
@@ -324,6 +328,8 @@ const CFG={GAME_MIN:10,Q_SEC:12, /* v10: ค่าสำรอง — เวล�
  /* v8: ★ สำคัญสำหรับเครือข่ายบริษัท ★ วาง URL API ของ Metered Open Relay (ฟรี) ที่นี่ แล้วทั้ง Host และผู้เล่นจะได้ TURN อัตโนมัติ
     รูปแบบ: 'https://<ชื่อแอป>.metered.live/api/v1/turn/credentials?apiKey=<API_KEY>'  (สมัครฟรีที่ metered.ca) */
  TURN_API:'',
+ BATCH_MS:500,        // v13: รวมการส่งสถานะ/วาดจอ Lobby เป็นรอบละ 0.5 วิ (กันหน่วงตอนเข้าห้องพร้อมกัน)
+ RESTORE_HOURS:3,     // v13: กู้คืนเกมที่บันทึกไว้ได้ภายใน 3 ชม.
  CONNECT_TIMEOUT_MS:15000 // v8: รอเชื่อมเครื่อง Host นานสุด (ผ่าน TURN อาจช้ากว่าปกติ)
 };
 /* v8: ดึง TURN จาก API ก่อนสร้างการเชื่อมต่อ (ถ้าไม่ได้ตั้งค่าไว้จะข้ามไป) */
@@ -332,7 +338,8 @@ const ICE_READY=(async()=>{const u=new URLSearchParams(location.search).get('tur
  try{const r=await fetch(u);const j=await r.json();const a=Array.isArray(j)?j:(j&&j.iceServers)||[];if(a.length){ICE_EXTRA=a;return true}}catch(e){}return false})();
 const hasTurn=()=>!!(CFG.TURN||ICE_EXTRA.length);
 const peerOpts=()=>({debug:0,config:{iceServers:CFG.ICE.concat(CFG.TURN?[].concat(CFG.TURN):[],ICE_EXTRA)}});
-const PREFIX='galaxy-mindrush-v12-';
+const PREFIX='galaxy-mindrush-v13-';
+const SAVE_KEY='gmr_host_'+PREFIX; /* v13: บันทึกสถานะเกมของ Host ในเครื่อง */
 
 /* ================= ทีม & รายชื่อ (ไม่รวม เคท = Host) — v7: เก็บเฉพาะชื่อเล่น ไม่มีชื่อ-นามสกุล ================= */
 const TEAMS=[
@@ -417,7 +424,7 @@ function mascot(tid,mood,size){
 }
 
 /* ================= คำถาม (a = index คำตอบที่ถูก 0-3) ================= */
-/* v12: ภาษาออฟฟิศ → ปริศนา · รูป 3D ชุดใหม่ (v11: ปริศนา/กับดักสมองแทนไซเบอร์) — t = วินาทีของข้อนั้น (ง่าย 10 · ปานกลาง 14 · ท้าทาย 18 · ข้อมีรูป +2)
+/* v12: ภาษาออฟฟิศ → ปริศนา · รูป 3D ชุดใหม่ — t = วินาทีของข้อนั้น (ง่าย 10 · ปานกลาง 14 · ท้าทาย 18 · ข้อมีรูป +2)
    img = ชื่อรูปใน IMG ด้านล่าง · แก้ไขได้จากไฟล์ Galaxy_Mind_Rush_Questions_v12.xlsx (ชีต "โค้ดสำหรับวาง") */
 const QUESTIONS=[
  {cat:'🖼️ ภาพย้อนวัย',q:'ก่อนเอาม้วนนี้ไปคืนร้านเช่าวิดีโอ มารยาทที่ต้องทำคืออะไร?',o:['ล้างหัวเทปให้สะอาด','กรอเทปกลับต้นม้วน','ห่อด้วยกระดาษ','ติดสติกเกอร์ชื่อ'],a:1,e:'ต้องกรอกลับ (Rewind) ไม่งั้นโดนร้านปรับหรือโดนบ่น 😄',t:12,img:'vhs'},
@@ -449,7 +456,7 @@ const Q_MIN=Math.min(...QUESTIONS.map(q=>q.t||CFG.Q_SEC)),Q_MAX=Math.max(...QUES
 const RULES=`<b>กติกา</b> · ${QUESTIONS.length} ข้อ · ข้อละ ${Q_MIN}–${Q_MAX} วินาทีตามความยาก · เวลารวมไม่เกิน ${CFG.GAME_MIN} นาที<br>
 ✅ ตอบถูกได้ <b>500</b> + โบนัสความเร็วสูงสุด <b>500</b> (ยิ่งตอบไวยิ่งได้มาก)<br>
 🔥 ตอบถูกติดกันได้โบนัส Streak +50 ต่อข้อ (สูงสุด +250) · ⚡ ${CFG.DOUBLE_LAST} ข้อสุดท้ายคะแนน <b>x2</b><br>
-🏆 อันดับทีมคิดจาก <b>คะแนนเฉลี่ยต่อคน</b> ทีมคนน้อยไม่เสียเปรียบ · ตอบได้ครั้งเดียว เปลี่ยนไม่ได้!`;
+🏆 อันดับทีมคิดจาก <b>คะแนนเฉลี่ยต่อคน</b> (นับเฉพาะคนที่ร่วมตอบ) ทีมคนน้อย/มีคนหลุดไม่เสียเปรียบ · ตอบได้ครั้งเดียว เปลี่ยนไม่ได้!`;
 
 /* ================= UTIL ================= */
 const app=document.getElementById('app');
@@ -510,6 +517,7 @@ function renderHome(){
  <div class="tag">🌌 GALAXY EDITION · ORBIT · COMET · NOVA · PULSE · GALAXY</div>
  <h1 class="title">GALAXY <span>MIND RUSH</span></h1>
  <p class="sub">เกมแข่งคิด แข่งเร็ว · 5 ทีม · ${ROSTER_N} ผู้เล่น · ${CFG.GAME_MIN} นาที</p>
+ ${Host.restoreBanner()}
  <div class="roles">
   <button class="role" onclick="Player.start(true)"><div class="ic">📱</div><b>เข้าร่วมเป็นผู้เล่น</b><small>ใส่รหัสห้อง → เลือกทีม → แตะชื่อตัวเอง</small></button>
   <button class="role" onclick="Host.setup()"><div class="ic">🖥️</div><b>ผู้ดำเนินเกม (Host)</b><small>สำหรับเคท · เปิดบนจอโปรเจกเตอร์</small></button>
@@ -520,18 +528,18 @@ function renderHome(){
 /* ================= HOST ================= */
 const H={mode:'online',code:'',players:{},phase:'lobby',qi:-1,ans:{},qStart:0,qDur:CFG.Q_SEC*1000,gameStart:0,auto:true,rv:null,t1:null,t2:null,tick:null,lastTick:-1};
 const Host={
- setup(){app.innerHTML=`<div class="center"><div class="logo">🖥️</div><h1 class="title">โหมด <span>Host</span></h1><p class="sub">เลือกวิธีเชื่อมต่อผู้เล่น</p>
+ setup(){app.innerHTML=`<div class="center"><div class="logo">🖥️</div><h1 class="title">โหมด <span>Host</span></h1><p class="sub">เลือกวิธีเชื่อมต่อผู้เล่น</p>${Host.restoreBanner()}
  <div class="roles"><button class="role" onclick="Host.create('online')"><div class="ic">🌐</div><b>เล่นจริง (ออนไลน์)</b><small>ผู้เล่นใช้มือถือ/โน้ตบุ๊กของตัวเอง ต้องมีอินเทอร์เน็ต</small></button>
  <button class="role" onclick="Host.create('local')"><div class="ic">🧪</div><b>ซ้อม / ทดสอบ</b><small>เปิดหลายแท็บในเครื่องเดียว</small></button></div>
  <button class="btn ghost sm" onclick="renderHome()">← กลับ</button></div>`},
- create(mode){
-  H.mode=mode;H.code=String(Math.floor(1000+Math.random()*9000));
+ create(mode,keep){
+  H.mode=mode;if(!keep){H.code=String(Math.floor(1000+Math.random()*9000));H.restored=false;Host.clearSave()} /* v13: keep=กู้คืนห้องเดิม */
   app.innerHTML=`<div class="center"><div class="spinner"></div><p>กำลังสร้างห้อง ${H.code}...</p></div>`;
   Net.destroy();H.ready=false;
   Net.hostStart(H.code,mode,m=>Host.onMsg(m),H.onSt=(st,e)=>{
-   if(st==='ready'){H.ready=true;H.rc=0;Host.wake();if(!H.tick)H.tick=setInterval(()=>Host.onTick(),250);if(!H.hb)H.hb=setInterval(()=>Net.broadcast({type:'ping',phase:H.phase,qi:H.qi}),CFG.HEARTBEAT_MS);Host.render();return}
+   if(st==='ready'){H.ready=true;H.rc=0;Host.wake();if(H.restored&&!H.rsToast){H.rsToast=1;[600,2500,6000].forEach(d=>setTimeout(()=>Net.broadcast({type:'whois'}),d));setTimeout(()=>toast('♻️ กู้คืนห้อง '+H.code+' แล้ว · ผู้เล่นจะเชื่อมกลับอัตโนมัติ · กด ถัดไป ▶ เพื่อเล่นต่อ'),300)}Host.save();if(!H.tick)H.tick=setInterval(()=>Host.onTick(),250);if(!H.hb)H.hb=setInterval(()=>Net.broadcast({type:'ping',phase:H.phase,qi:H.qi}),CFG.HEARTBEAT_MS);Host.render();return}
    /* v8: รหัสซ้ำตอน "สร้างห้องครั้งแรก" เท่านั้นที่สุ่มรหัสใหม่ — ถ้าห้องเปิดอยู่แล้วจะเชื่อมกลับด้วยรหัสเดิม ผู้เล่นไม่ต้องเปลี่ยนลิงก์ */
-   if(e&&e.type==='unavailable-id'&&!H.ready){Host.create(mode);return}
+   if(e&&e.type==='unavailable-id'&&!H.ready){if(H.restored){toast('⏳ รอปล่อยรหัสห้องเดิม '+H.code+' ...');try{Net.peer&&Net.peer.destroy()}catch(x){}setTimeout(()=>Host.create(mode,true),3000);return}Host.create(mode);return}
    if(H.ready){if(!Net.peer||Net.peer.destroyed||(e&&e.type==='unavailable-id'))Host.reconnect();else toast('⚠️ การเชื่อมต่อมีปัญหา: '+(e&&e.type||''));Host.onTick();return}
    app.innerHTML=`<div class="center"><div class="logo">⚠️</div><h2>สร้างห้องออนไลน์ไม่สำเร็จ</h2><p class="sub">${e&&e.type==='nolib'?'โหลดระบบ PeerJS ไม่ได้ (ไม่มีอินเทอร์เน็ต หรือเครือข่ายบล็อก)':'เครือข่ายอาจบล็อก WebRTC ('+(e&&e.type||'')+')'}</p>
    <div style="display:flex;gap:10px"><button class="btn" onclick="Host.create('online')">ลองใหม่</button><button class="btn ghost" onclick="Host.create('local')">ใช้โหมดทดสอบ</button></div></div>`;
@@ -546,39 +554,67 @@ const Host={
   H.rcT=setTimeout(()=>{H.rcT=null;try{Net.peer&&Net.peer.destroy()}catch(e){}Net.peer=null;Net.conns=[];Net.hostStart(H.code,'online',m=>Host.onMsg(m),H.onSt)},Math.min(2000*H.rc,8000))},
  wake(){ /* v8: กันจอ Host ดับระหว่างเล่น */
   try{if(navigator.wakeLock&&!H.wl)navigator.wakeLock.request('screen').then(l=>{H.wl=l;l.addEventListener('release',()=>H.wl=null)}).catch(()=>{})}catch(e){}},
+ /* ===== v13: บันทึก/กู้คืนสถานะเกม (ป้องกันคะแนนหายเมื่อรีเฟรช/ปิดแท็บ Host) ===== */
+ save(){if(!H.code)return;try{const ps={};Object.values(H.players).forEach(p=>{ps[p.pid]={pid:p.pid,team:p.team,nick:p.nick,score:p.score,streak:p.streak,correct:p.correct,time:p.time,played:p.played||0,bot:!!p.bot}});
+  localStorage.setItem(SAVE_KEY,JSON.stringify({v:13,at:Date.now(),code:H.code,mode:H.mode,phase:H.phase,qi:H.qi,gameStart:H.gameStart,players:ps}))}catch(e){}},
+ saveSoon(){clearTimeout(H.svT);H.svT=setTimeout(()=>Host.save(),800)},
+ clearSave(){try{localStorage.removeItem(SAVE_KEY)}catch(e){}},
+ loadSave(){try{const d=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');if(d&&d.code&&Date.now()-d.at<CFG.RESTORE_HOURS*3600e3&&Object.keys(d.players||{}).length)return d}catch(e){}return null},
+ restoreBanner(){const d=Host.loadSave();if(!d)return '';const n=Object.values(d.players).filter(p=>!p.bot).length,ph={lobby:'รอเริ่มเกม',question:'กำลังถามข้อ '+(d.qi+1),reveal:'เฉลยข้อ '+(d.qi+1),board:'จบข้อ '+(d.qi+1),end:'จบเกมแล้ว'}[d.phase]||d.phase,tm=new Date(d.at).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'});
+  return `<div class="card rsbox">♻️ พบเกมที่บันทึกไว้ · ห้อง <b>${d.code}</b>${d.mode==='local'?' (ทดสอบ)':''} · ${ph} · ผู้เล่น ${n} คน · บันทึกเมื่อ ${tm} น.<div class="rsbtn"><button class="btn sm" onclick="Host.restore()">กู้คืนเกม (คะแนนเดิม)</button><button class="btn ghost sm" onclick="if(confirm('ทิ้งเกมที่บันทึกไว้?')){Host.clearSave();renderHome()}">ทิ้ง</button></div></div>`},
+ restore(){const d=Host.loadSave();if(!d){renderHome();return}
+  H.players={};Object.values(d.players).forEach(p=>H.players[p.pid]={...p,online:false,cid:null,conn:null});
+  H.gameStart=d.gameStart?d.gameStart+(Date.now()-d.at):0; /* ไม่นับเวลาที่ห้องหลุด */
+  H.auto=false;H.rv=null;H.ans={};H.restored=true;H.rsToast=0;
+  if(d.phase==='lobby'){H.phase='lobby';H.qi=-1}
+  else if(d.phase==='end'){H.phase='end';H.qi=d.qi}
+  else{H.phase='board';H.qi=d.phase==='question'?d.qi-1:d.qi} /* ข้อที่ถามค้างอยู่จะถามใหม่ */
+  H.code=d.code;Host.create(d.mode,true)},
+ /* ===== v13: ล็อกชื่อ — ปลดล็อกได้โดย Host เท่านั้น ===== */
+ unlock(pid,noAsk){const p=H.players[pid];if(!p)return;
+  if(!noAsk&&!confirm(`🔓 ปลดล็อกชื่อ “${p.nick}” (${teamOf(p.team).name})?\nใช้เมื่อผู้เล่นเปลี่ยนเครื่อง/เครื่องค้าง — คะแนนเดิมยังอยู่`))return;
+  const c=p.conn;p.online=false;p.cid=null;p.conn=null;if(c){try{c.close()}catch(e){}}
+  toast('🔓 ปลดล็อก '+p.nick+' แล้ว ให้ผู้เล่นแตะชื่อใหม่ได้');Host.pushSoon();if(H.phase==='lobby')Host.render();else Host.updateCount()},
+ unlockPrompt(){const ol=Object.values(H.players).filter(p=>p.online&&!p.bot);if(!ol.length){toast('ยังไม่มีชื่อที่ถูกล็อก');return}
+  const k=parseInt(prompt('🔓 พิมพ์หมายเลขชื่อที่จะปลดล็อก (ผู้เล่นเปลี่ยนเครื่อง/เครื่องค้าง)\n\n'+ol.map((p,i)=>`${i+1}. ${p.nick} — ${teamOf(p.team).name}`).join('\n'))||'',10);
+  if(k>=1&&k<=ol.length)Host.unlock(ol[k-1].pid,true)},
  joinUrl(){return location.href.split(/[?#]/)[0]+'?room='+H.code+(H.mode==='local'?'&mode=local':'')},
  onMsg(m){
-  if(m.type==='hello'){Net.reply(m,Host.state());return}
+  if(m.type==='hello'){if(m.pid){const p=H.players[m.pid];if(p&&!p.bot&&(!p.online||p.cid===m.cid)){const was=p.online;p.online=true;p.cid=m.cid;if(m._conn)p.conn=m._conn;if(!was){Host.pushSoon();if(H.phase==='lobby')Host.renderSoon();else Host.updateCount()}}} /* v13: เชื่อมผู้เล่นเดิมกลับหลังกู้คืน */Net.reply(m,Host.state());return}
   if(m.type==='join'){
    const r=ROSTER[m.pid];if(!r)return;
    let p=H.players[m.pid];
-   if(!p)p=H.players[m.pid]={...r,score:0,streak:0,correct:0,time:0};
+   /* v13: ชื่อที่มีคนออนไลน์อยู่จะถูกล็อก — เข้าแทนไม่ได้ จนกว่า Host จะปลดล็อก (เครื่องเดิม cid เดิม เชื่อมกลับได้ตามปกติ) */
+   if(p&&p.online&&!p.bot&&p.cid&&p.cid!==m.cid){Net.reply(m,{type:'taken',pid:m.pid});return}
+   if(!p)p=H.players[m.pid]={...r,score:0,streak:0,correct:0,time:0,played:0};
    p.online=true;p.bot=false;p.cid=m.cid;p.conn=m._conn||null;
    Net.reply(m,{type:'joined',pid:m.pid});
-   Host.push();
-   if(H.phase==='lobby'){Host.render();sfx('join')}else Host.updateCount();
+   Host.pushSoon();Host.saveSoon();
+   if(H.phase==='lobby')Host.renderSoon();else Host.updateCount();
    return;
   }
-  if(m.type==='answer'){Host.answer(m.pid,m.qi,m.c,m);return}
-  if(m.type==='leave'){const p=H.players[m.pid];if(p&&p.cid===m.cid){if(H.phase==='lobby')delete H.players[m.pid];else p.online=false;Host.push();if(H.phase==='lobby')Host.render()}return}
-  if(m.type==='_close'){Object.values(H.players).forEach(p=>{if(p.conn&&p.conn===m._conn)p.online=false});if(H.phase==='lobby')Host.render();else Host.updateCount()}
+  if(m.type==='answer'){const p=H.players[m.pid];if(!p||(p.cid&&p.cid!==m.cid))return; /* v13: รับคำตอบเฉพาะเครื่องเจ้าของชื่อ */Host.answer(m.pid,m.qi,m.c,m);return}
+  if(m.type==='leave'){const p=H.players[m.pid];if(p&&p.cid===m.cid){if(H.phase==='lobby')delete H.players[m.pid];else p.online=false;Host.pushSoon();Host.saveSoon();if(H.phase==='lobby')Host.renderSoon()}return}
+  if(m.type==='_close'){Object.values(H.players).forEach(p=>{if(p.conn&&p.conn===m._conn)p.online=false});Host.pushSoon();if(H.phase==='lobby')Host.renderSoon();else Host.updateCount()}
  },
  isDbl(i){return i>=QUESTIONS.length-CFG.DOUBLE_LAST},
  gameLeft(){return CFG.GAME_MIN*60000-(H.gameStart?Date.now()-H.gameStart:0)},
  active(){return Object.values(H.players).filter(p=>p.online||p.bot)},
  ranked(){return Object.values(H.players).sort((a,b)=>b.score-a.score||b.correct-a.correct||a.time-b.time)},
  teamStats(){
-  const arr=TEAMS.map(t=>{const ms=Object.values(H.players).filter(p=>p.team===t.id);const sum=ms.reduce((s,p)=>s+p.score,0);return{...t,n:ms.length,sum,avg:ms.length?Math.round(sum/ms.length):0}});
+  const arr=TEAMS.map(t=>{const ms=Object.values(H.players).filter(p=>p.team===t.id),pl=ms.filter(p=>(p.played||0)>0),base=pl.length?pl:ms;const sum=ms.reduce((s,p)=>s+p.score,0);return{...t,n:ms.length,np:pl.length,sum,avg:base.length?Math.round(sum/base.length):0}}); /* v13: เฉลี่ยเฉพาะคนที่ตอบ ≥1 ข้อ — คนหลุด/ไม่ได้เล่นไม่ดึงคะแนนทีม */
   arr.sort((a,b)=>b.avg-a.avg||b.sum-a.sum);arr.forEach((t,i)=>t.rank=i+1);const any=arr.some(t=>t.sum>0);arr.forEach(t=>t.mood=moodOf(t.rank,any));return arr;
  },
  state(){
-  const s={type:'state',phase:H.phase,qi:H.qi,total:QUESTIONS.length,gameLeft:Host.gameLeft(),taken:Host.active().map(p=>p.pid),n:Host.active().length};
+  const s={type:'state',phase:H.phase,qi:H.qi,total:QUESTIONS.length,gameLeft:Host.gameLeft(),taken:Host.active().filter(p=>!p.bot).map(p=>p.pid),n:Host.active().length};
   if(H.phase==='question'){const q=QUESTIONS[H.qi];s.q={cat:q.cat,q:q.q,o:q.o,dbl:Host.isDbl(H.qi),img:q.img||'',t:q.t||CFG.Q_SEC};s.qDur=H.qDur;s.qLeft=Math.max(0,H.qDur-(Date.now()-H.qStart))}
   if(H.phase!=='lobby'){const rk={};Host.ranked().forEach((p,i)=>rk[p.pid]=[i+1,p.score,p.streak,p.correct]);s.ranks=rk;s.teams=Host.teamStats().map(t=>({id:t.id,avg:t.avg,rank:t.rank,mood:t.mood}))}
   if(H.rv&&H.phase!=='question'&&H.phase!=='lobby'){s.rv={qi:H.rv.qi,a:H.rv.a,o:QUESTIONS[H.rv.qi].o,e:H.rv.e,res:H.rv.res}}
   return s;
  },
- push(){Net.broadcast(Host.state())},
+ push(){clearTimeout(H.pushT);H.pushT=null;Net.broadcast(Host.state())},
+ pushSoon(){if(!H.pushT)H.pushT=setTimeout(()=>{H.pushT=null;Host.push()},CFG.BATCH_MS)}, /* v13 */
+ renderSoon(){if(H.rT)return;H.rT=setTimeout(()=>{H.rT=null;if(H.phase==='lobby'){Host.render();sfx('join')}},CFG.BATCH_MS)}, /* v13 */
  startGame(){
   if(H.phase!=='lobby')return;
   if(!Host.active().length){toast('ยังไม่มีผู้เล่นเข้าห้อง');return}
@@ -588,7 +624,7 @@ const Host={
   clearTimeout(H.t1);clearTimeout(H.t2);
   if(H.qi+1>=QUESTIONS.length||Host.gameLeft()<=0)return Host.end();
   H.qi++;H.phase='question';H.ans={};H.qStart=Date.now();H.qDur=(QUESTIONS[H.qi].t||CFG.Q_SEC)*1000;H.rv=null;H.lastTick=-1;
-  Host.push();Host.render();Host.runBots();
+  Host.push();Host.render();Host.runBots();Host.save();
   H.t1=setTimeout(()=>Host.reveal(),H.qDur+250);
  },
  runBots(){const q=QUESTIONS[H.qi],qi=H.qi;Object.values(H.players).filter(p=>p.bot).forEach(p=>{const c=Math.random()<.6?q.a:Math.floor(Math.random()*4);setTimeout(()=>Host.answer(p.pid,qi,c,null),1200+Math.random()*Math.max(1000,H.qDur-2500))})},
@@ -607,23 +643,23 @@ const Host={
   const dist=[0,0,0,0],res={};let fast=null,nOk=0;
   Object.values(H.players).forEach(p=>{
    const a=H.ans[p.pid];let ok=false,pts=0;
-   if(a){dist[a.c]++;ok=a.c===q.a}
+   if(a){dist[a.c]++;ok=a.c===q.a;p.played=(p.played||0)+1} /* v13: นับข้อที่ร่วมตอบ */
    if(ok){nOk++;p.streak++;p.correct++;p.time+=a.t;const sp=Math.max(0,1-a.t/H.qDur);pts=Math.round((500+500*sp)*mult)+Math.min(p.streak-1,5)*50;if(!fast||a.t<fast.t)fast={pid:p.pid,t:a.t}}
    else p.streak=0;
    p.score+=pts;res[p.pid]={ok,pts,ans:a?a.c:-1};
   });
   H.rv={qi:H.qi,a:q.a,dist,fast,res,e:q.e||'',nAns:Object.keys(H.ans).length,nOk};
-  Host.push();Host.render();sfx('reveal');
+  Host.save();Host.push();Host.render();sfx('reveal');
   if(H.auto)H.t2=setTimeout(()=>Host.board(),CFG.REVEAL_SEC*1000);
  },
- board(){clearTimeout(H.t2);H.phase='board';Host.push();Host.render();if(H.auto)H.t2=setTimeout(()=>Host.nextQ(),CFG.BOARD_SEC*1000)},
+ board(){clearTimeout(H.t2);H.phase='board';Host.save();Host.push();Host.render();if(H.auto)H.t2=setTimeout(()=>Host.nextQ(),CFG.BOARD_SEC*1000)},
  next(){({lobby:Host.startGame,question:Host.reveal,reveal:Host.board,board:Host.nextQ}[H.phase]||(()=>{}))()},
  setAuto(v){H.auto=v;clearTimeout(H.t2);if(v){if(H.phase==='reveal')H.t2=setTimeout(()=>Host.board(),3000);else if(H.phase==='board')H.t2=setTimeout(()=>Host.nextQ(),3000)}},
- end(){clearTimeout(H.t1);clearTimeout(H.t2);H.phase='end';Host.push();Host.render();sfx('end');confetti(180)},
+ end(){clearTimeout(H.t1);clearTimeout(H.t2);H.phase='end';Host.save();Host.push();Host.render();sfx('end');confetti(180)},
  confirmEnd(){if(confirm('จบเกมตอนนี้และประกาศผลเลยไหม?'))Host.end()},
- reset(){if(!confirm('เริ่มรอบใหม่? คะแนนทั้งหมดจะถูกล้าง (ผู้เล่นยังอยู่ในห้อง)'))return;Object.values(H.players).forEach(p=>{p.score=0;p.streak=0;p.correct=0;p.time=0});H.phase='lobby';H.qi=-1;H.gameStart=0;H.rv=null;H.ans={};Host.push();Host.render()},
- addBots(){let n=0;Object.values(ROSTER).forEach(r=>{if(!H.players[r.pid]){H.players[r.pid]={...r,score:0,streak:0,correct:0,time:0,bot:true,online:false};n++}});toast(`เติมบอทซ้อม ${n} ตัว`);Host.push();Host.render()},
- removeBots(){Object.values(H.players).forEach(p=>{if(p.bot)delete H.players[p.pid]});Host.push();Host.render()},
+ reset(){if(!confirm('เริ่มรอบใหม่? คะแนนทั้งหมดจะถูกล้าง (ผู้เล่นยังอยู่ในห้อง)'))return;Object.values(H.players).forEach(p=>{p.score=0;p.streak=0;p.correct=0;p.time=0;p.played=0});H.phase='lobby';H.qi=-1;H.gameStart=0;H.rv=null;H.ans={};Host.save();Host.push();Host.render()},
+ addBots(){let n=0;Object.values(ROSTER).forEach(r=>{if(!H.players[r.pid]){H.players[r.pid]={...r,score:0,streak:0,correct:0,time:0,played:0,bot:true,online:false};n++}});toast(`เติมบอทซ้อม ${n} ตัว`);Host.save();Host.push();Host.render()},
+ removeBots(){Object.values(H.players).forEach(p=>{if(p.bot)delete H.players[p.pid]});Host.save();Host.push();Host.render()},
  onTick(){
   const nn=document.getElementById('netN');if(nn){nn.textContent=Net.conns.length;const np=document.getElementById('netPill');np.className='net '+(Net.peer&&!Net.peer.disconnected?'ok':'bad')}
   const g=document.getElementById('gTimer');
@@ -640,7 +676,7 @@ const Host={
   <div class="pill">ห้อง <b>${H.code}</b>${H.mode==='local'?' · 🧪 ทดสอบ':''}</div>${H.mode==='online'?`<span class="net ${Net.peer&&!Net.peer.disconnected?'ok':'bad'}" id="netPill"><i></i>ออนไลน์ <b id="netN">${Net.conns.length}</b> เครื่อง</span>`:''}
   ${H.phase!=='lobby'?`<div class="pill">ข้อ <b>${Math.min(H.qi+1,QUESTIONS.length)}</b>/${QUESTIONS.length}</div>`:''}
   <div class="pill gt" id="gTimer">⏱ ${fmt(Host.gameLeft())}</div>
-  ${H.phase!=='end'?`<label class="auto"><input type="checkbox" ${H.auto?'checked':''} onchange="Host.setAuto(this.checked)"> Auto</label>
+  ${H.phase!=='end'?`<button class="btn ghost sm" onclick="Host.unlockPrompt()" title="ปลดล็อกชื่อผู้เล่นที่เปลี่ยนเครื่อง/ค้าง">🔓</button><label class="auto"><input type="checkbox" ${H.auto?'checked':''} onchange="Host.setAuto(this.checked)"> Auto</label>
   <button class="btn sm" onclick="Host.next()">${H.phase==='lobby'?'เริ่ม':'ถัดไป'} ▶</button>
   ${H.phase!=='lobby'?'<button class="btn sm ghost" onclick="Host.confirmEnd()">จบเกม</button>':''}`:''}</div>`},
  vLobby(){
@@ -661,7 +697,7 @@ const Host={
   </div></div>
   <div class="teams5">${TEAMS.map(t=>{const c=t.members.filter((m,i)=>{const p=H.players[t.id+i];return p&&(p.online||p.bot)}).length;
    return `<div class="tcol" style="--tc:${t.color}"><div class="th"><span>${mascot(t.id,c?'happy':'ok',46)}<span>${t.name}<span class="hname">${STAR[t.id].th}</span></span></span><span>${c}/${t.members.length}</span></div>
-   ${t.members.map((m,i)=>{const p=H.players[t.id+i];const cls=p?(p.bot?'on bot':(p.online?'on':'off')):'';return `<div class="chip ${cls}">${p&&p.bot?'🤖 ':''}${m}</div>`}).join('')}</div>`}).join('')}</div>`;
+   ${t.members.map((m,i)=>{const p=H.players[t.id+i];const cls=p?(p.bot?'on bot':(p.online?'on':'off')):'',lk=p&&p.online&&!p.bot;return `<div class="chip ${cls}${lk?' lk':''}"${lk?` onclick="Host.unlock('${t.id+i}')" title="แตะเพื่อปลดล็อกชื่อ (ผู้เล่นเปลี่ยนเครื่อง)"`:''}>${p&&p.bot?'🤖 ':''}${m}${lk?' 🔒':''}</div>`}).join('')}</div>`}).join('')}</div>`;
  },
  ring(){return `<div class="ring"><svg viewBox="0 0 120 120"><circle class="rbg" cx="60" cy="60" r="52"/><circle id="ringFg" class="rfg" cx="60" cy="60" r="52"/></svg><div class="num" id="qNum">${Math.ceil(H.qDur/1000)}</div></div>`},
  vStrip(){return `<div class="strip">${Host.teamStats().map(t=>`<div class="sitem" style="--tc:${t.color}"><span>#${t.rank} ${mascot(t.id,t.mood,36)} ${t.name}</span><span>${t.avg.toLocaleString()}</span></div>`).join('')}</div>`},
@@ -684,14 +720,14 @@ const Host={
   </div>${Host.vStrip()}`},
  vBoard(){const ts=Host.teamStats(),mx=Math.max(1,...ts.map(t=>t.avg)),top=Host.ranked().slice(0,10),left=QUESTIONS.length-H.qi-1;
   return `<div class="board">
-  <div class="card panel"><h3>🏆 อันดับทีม <small class="sub">คะแนนเฉลี่ยต่อคน</small></h3>${ts.map(t=>`<div class="trow" style="--tc:${t.color}"><div class="rk r${t.rank}">${t.rank}</div><div style="display:flex;align-items:center;gap:8px">${mascot(t.id,t.mood,60)}<div>${t.name}<span class="mood">${MOOD_TXT[t.mood]}</span><small class="sub" style="display:block;font-size:12px">${t.n} คน · รวม ${t.sum.toLocaleString()}</small></div></div><div class="tbar"><i style="width:${t.avg/mx*100}%"></i></div><div class="tv">${t.avg.toLocaleString()}</div></div>`).join('')}</div>
+  <div class="card panel"><h3>🏆 อันดับทีม <small class="sub">คะแนนเฉลี่ยต่อคน</small></h3>${ts.map(t=>`<div class="trow" style="--tc:${t.color}"><div class="rk r${t.rank}">${t.rank}</div><div style="display:flex;align-items:center;gap:8px">${mascot(t.id,t.mood,60)}<div>${t.name}<span class="mood">${MOOD_TXT[t.mood]}</span><small class="sub" style="display:block;font-size:12px">${t.np&&t.np<t.n?`ร่วมตอบ ${t.np}/${t.n} คน`:`${t.n} คน`} · รวม ${t.sum.toLocaleString()}</small></div></div><div class="tbar"><i style="width:${t.avg/mx*100}%"></i></div><div class="tv">${t.avg.toLocaleString()}</div></div>`).join('')}</div>
   <div class="card panel"><h3>⭐ Top 10 ผู้เล่น</h3>${top.map((p,i)=>`<div class="prow" style="--tc:${teamOf(p.team).color}"><div class="rk r${i+1}">${i+1}</div><div><span class="dot"></span>${p.nick} <small class="sub">${teamOf(p.team).name}</small></div><div>${p.streak>=2?'🔥'+p.streak:''}</div><div class="tv">${p.score.toLocaleString()}</div></div>`).join('')}</div>
   </div><div class="explain">${Host.gameLeft()<=0?`⏰ หมดเวลา ${CFG.GAME_MIN} นาทีแล้ว! กด ถัดไป เพื่อประกาศผล 🎉`:left>0?`เหลืออีก ${left} ข้อ${H.qi+1===QUESTIONS.length-CFG.DOUBLE_LAST?' · ⚡ ต่อไปเข้าสู่รอบ DOUBLE POINTS!':''}`:'ครบทุกข้อแล้ว! กด ถัดไป เพื่อประกาศผล 🎉'}</div>`},
  vEnd(){const ts=Host.teamStats(),top=Host.ranked(),order=[3,1,0,2,4].filter(i=>ts[i]);
   /* v10: สถิติชัยชนะรายทีม */
   const played=Math.max(1,Math.min(H.qi+1,QUESTIONS.length)),ps=Object.values(H.players);
   ts.forEach(t=>{const m=ps.filter(p=>p.team===t.id),c=m.reduce((a,p)=>a+p.correct,0),tm=m.reduce((a,p)=>a+p.time,0);
-   t.acc=m.length?Math.round(c/(m.length*played)*100):0;t.spd=c?tm/c/1000:null;t.star=m.slice().sort((a,b)=>b.score-a.score)[0]});
+   const pm=m.filter(p=>(p.played||0)>0);t.acc=pm.length?Math.round(c/(pm.length*played)*100):0;t.spd=c?tm/c/1000:null;t.star=m.slice().sort((a,b)=>b.score-a.score)[0]});
   const bestAcc=Math.max(...ts.map(t=>t.acc)),spds=ts.filter(t=>t.spd!=null).map(t=>t.spd),bestSpd=spds.length?Math.min(...spds):null;
   const AW=['🏆 แชมป์จักรวาล','🥈 รองแชมป์ดาวรุ่ง','🥉 ดาวเด่นอันดับ 3','🚀 ทีมพลังใจ','🌙 ทีมสู้ไม่ถอย'];
   return `<div class="center" style="min-height:auto;gap:12px">
@@ -700,19 +736,19 @@ const Host={
   <div class="podium p5set">${order.map(i=>{const t=ts[i];const bdg=[t.acc===bestAcc&&t.acc>0?'<span class="bdg">🎯 แม่นที่สุด '+t.acc+'%</span>':'',t.spd!=null&&t.spd===bestSpd?'<span class="bdg">⚡ ไวที่สุด '+t.spd.toFixed(1)+' วิ</span>':''].join('');
    return `<div class="pod p${i+1}" style="--tc:${t.color};--r:${i+1}"><div class="medal">${i<3?['🥇','🥈','🥉'][i]:'<span class="rkn">'+(i+1)+'</span>'}</div>${mascot(t.id,i===0?'champ':t.mood,i===0?110:84)}
    <div class="blk"><div class="pn">${t.name}<span class="hname">${STAR[t.id].th}</span></div><div class="aw">${AW[i]}</div><div class="avg">${t.avg.toLocaleString()}<small> /คน</small></div>
-   <div class="vst"><span>✅ ถูก ${t.acc}%</span><span>👥 ${t.n} คน · รวม ${t.sum.toLocaleString()}</span>${t.star&&t.star.score>0?`<span>⭐ ดาวเด่น: <b>${t.star.nick}</b></span>`:''}</div>${bdg?`<div class="bdgs">${bdg}</div>`:''}</div></div>`}).join('')}</div>
+   <div class="vst"><span>✅ ถูก ${t.acc}%</span><span>👥 ${t.np&&t.np<t.n?`ร่วมตอบ ${t.np}/${t.n}`:t.n} คน · รวม ${t.sum.toLocaleString()}</span>${t.star&&t.star.score>0?`<span>⭐ ดาวเด่น: <b>${t.star.nick}</b></span>`:''}</div>${bdg?`<div class="bdgs">${bdg}</div>`:''}</div></div>`}).join('')}</div>
   <div class="mvp">${top.slice(0,3).map((p,i)=>`<div class="banner" style="border-color:${teamOf(p.team).color}">${['🥇','🥈','🥉'][i]} MVP <b>${p.nick}</b> · ${teamOf(p.team).name} · ${p.score.toLocaleString()} (ถูก ${p.correct} ข้อ)</div>`).join('')}</div>
   <div style="width:100%">${Host.vStrip()}</div>
   <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center"><button class="btn" onclick="Host.csv()">⬇️ ดาวน์โหลดผล (CSV)</button><button class="btn ghost" onclick="Host.reset()">🔁 เล่นรอบใหม่</button></div></div>`},
  csv(){
   const rows=[['อันดับ','ทีม','ชื่อเล่น','คะแนน','ตอบถูก(ข้อ)','เวลาเฉลี่ยข้อที่ถูก(วิ)','ประเภท']];
   Host.ranked().forEach((p,i)=>rows.push([i+1,teamOf(p.team).name,p.nick,p.score,p.correct,p.correct?(p.time/p.correct/1000).toFixed(2):'',p.bot?'บอท':'ผู้เล่น']));
-  rows.push([]);rows.push(['อันดับทีม','ทีม','จำนวนคน','คะแนนรวม','คะแนนเฉลี่ยต่อคน']);Host.teamStats().forEach(t=>rows.push([t.rank,t.name,t.n,t.sum,t.avg]));
+  rows.push([]);rows.push(['อันดับทีม','ทีม','จำนวนคน','คนที่ร่วมตอบ','คะแนนรวม','คะแนนเฉลี่ยต่อคน (เฉพาะคนที่ร่วมตอบ)']);Host.teamStats().forEach(t=>rows.push([t.rank,t.name,t.n,t.np,t.sum,t.avg]));
   const s='\ufeff'+rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([s],{type:'text/csv;charset=utf-8'}));a.download=`GalaxyMindRush_${H.code}.csv`;a.click();
  }
 };
-window.addEventListener('beforeunload',e=>{if(H.gameStart&&H.phase!=='end'){e.preventDefault();e.returnValue=''}});
+window.addEventListener('beforeunload',e=>{if(H.code&&H.ready)Host.save();if(H.gameStart&&H.phase!=='end'){e.preventDefault();e.returnValue=''}});
 document.addEventListener('visibilitychange',()=>{if(document.hidden||!H.ready||H.mode!=='online')return;Host.wake();
  if(!Net.peer||Net.peer.destroyed)Host.reconnect();else if(Net.peer.disconnected){try{Net.peer.reconnect()}catch(e){Host.reconnect()}}});
 /* v8: ตรวจทุก 5 วิ ว่า Host ยังต่อกับเซิร์ฟเวอร์อยู่ */
@@ -736,7 +772,10 @@ const Player={
   if(auto&&qs.get('room')&&/^\d{4}$/.test(P.code))Player.connect();
  },
  err(msg){const e=document.getElementById('pErr');if(e)e.textContent=msg},
- fail(msg){clearTimeout(P.to);Net.destroy();Player.start(false);Player.err(msg)},
+ fail(msg){clearTimeout(P.to);Net.destroy();
+  /* v13: ถ้าเคยเข้าเกมแล้ว (มีชื่อ) ให้รอห้องกลับมาเอง สูงสุด ~2 นาที — รองรับ Host รีเฟรช/กู้คืนเกม */
+  if(P.pid&&P.mode==='online'&&(P.wait=(P.wait||0)+1)<=40){app.innerHTML=`<div class="center"><div class="spinner"></div><h3>📡 กำลังรอห้อง ${P.code} กลับมา...</h3><div class="stage">คะแนนของคุณยังอยู่ · ไม่ต้องปิดหน้านี้ (${P.wait}/40)</div><button class="btn ghost sm" onclick="P.wait=99;Player.fail('ยกเลิกการรอแล้ว')">ยกเลิก</button></div>`;setTimeout(()=>{if(P.wait<=40)Player.connect()},3000);return}
+  P.wait=0;Player.start(false);Player.err(msg)},
  connect(){
   const ci=document.getElementById('codeIn');
   if(ci){P.code=ci.value.trim();P.mode=document.getElementById('localCk').checked?'local':'online'}
@@ -767,7 +806,8 @@ const Player={
  onMsg(m){
   if(!m||(m.to&&m.to!==P.cid))return;
   P.last=Date.now();
-  if(m.type==='ping'){if(!P.st||P.st.phase!==m.phase||P.st.qi!==m.qi)Net.toHost({type:'hello',cid:P.cid});return}
+  if(m.type==='ping'){if(!P.st||P.st.phase!==m.phase||P.st.qi!==m.qi)Net.toHost({type:'hello',cid:P.cid,pid:P.pid});return}
+  if(m.type==='whois'){if(P.pid)Net.toHost({type:'hello',cid:P.cid,pid:P.pid});return}
   if(m.type==='state'){
    clearTimeout(P.to);const prev=P.st;P.st=m;
    if(P.pid&&m.phase!=='lobby'&&m.ranks&&!m.ranks[P.pid]&&!(m.taken||[]).includes(P.pid)){P.pid=null;ss.del('gmr_pid')}
@@ -776,11 +816,12 @@ const Player={
    if(m.phase==='lobby'&&prev&&prev.phase!=='lobby'){P.ansQi=-1}
    Player.render();return;
   }
-  if(m.type==='joined'){P.pid=m.pid;ss.set('gmr_pid',m.pid);Player.render();return}
+  if(m.type==='taken'){toast('🔒 ชื่อนี้มีคนใช้อยู่ — ถ้าเป็นชื่อคุณ ให้แจ้ง Host ปลดล็อก');P.pid=null;ss.del('gmr_pid');if(P.st)Player.render();return} /* v13 */
+  if(m.type==='joined'){P.pid=m.pid;P.wait=0;ss.set('gmr_pid',m.pid);Player.render();return}
   if(m.type==='ack'){P.ackT=m.t;if(P.st&&P.st.phase==='question')Player.render()}
  },
  team(id){P.pickTeam=id;Player.render()},
- pick(pid,tk){if(tk&&!confirm('ชื่อนี้เข้าห้องแล้ว ต้องการเข้าแทน (เช่น เปลี่ยนเครื่อง) ใช่ไหม?'))return;Net.toHost({type:'join',cid:P.cid,pid});app.innerHTML=`<div class="center"><div class="spinner"></div><p>กำลังเข้าร่วม...</p></div>`},
+ pick(pid,tk){if(tk){alert('🔒 ชื่อนี้มีคนใช้อยู่ในห้องแล้ว\n\nถ้าเป็นชื่อของคุณ (เช่น เปลี่ยนเครื่อง) ให้แจ้ง Host กด 🔓 ปลดล็อกชื่อ แล้วแตะชื่ออีกครั้ง');return} /* v13 */Net.toHost({type:'join',cid:P.cid,pid});app.innerHTML=`<div class="center"><div class="spinner"></div><p>กำลังเข้าร่วม...</p></div>`},
  leave(){Net.toHost({type:'leave',cid:P.cid,pid:P.pid});P.pid=null;P.pickTeam=null;ss.del('gmr_pid');Player.render()},
  answer(i){const s=P.st;if(!s||s.phase!=='question'||P.ansQi===s.qi||Date.now()>P.deadline)return;P.ansQi=s.qi;P.ansC=i;P.ackT=null;Net.toHost({type:'answer',cid:P.cid,pid:P.pid,qi:s.qi,c:i});if(navigator.vibrate)navigator.vibrate(30);sfx('tap');Player.render()},
  vPick(){
@@ -790,7 +831,7 @@ const Player={
   const t=teamOf(P.pickTeam);
   app.innerHTML=`<div class="pl" style="--tc:${t.color}"><div class="ptop">${mascot(t.id,'happy',52)}<div class="nm">${t.name}<span class="hname">${STAR[t.id].th}</span></div><button class="btn ghost sm" onclick="Player.team(null)">เปลี่ยนทีม</button></div>
   <h3 style="text-align:center">แตะชื่อของคุณ</h3>
-  <div class="npick">${t.members.map((m,i)=>{const pid=t.id+i,tk=taken.has(pid);return `<button class="nbtn ${tk?'taken':''}" onclick="Player.pick('${pid}',${tk})"><b>${m}</b>${tk?'<small>✅ เข้าห้องแล้ว</small>':''}</button>`}).join('')}</div></div>`;
+  <div class="npick">${t.members.map((m,i)=>{const pid=t.id+i,tk=taken.has(pid);return `<button class="nbtn ${tk?'taken':''}" onclick="Player.pick('${pid}',${tk})"><b>${m}</b>${tk?'<small>🔒 มีคนใช้อยู่</small>':''}</button>`}).join('')}</div></div>`;
  },
  render(){
   const s=P.st;if(!s)return;
@@ -842,7 +883,7 @@ const Player={
 setInterval(()=>Player.tick(),200);
 /* v6: เฝ้าดูการเชื่อมต่อ — ไม่ได้ยินจาก Host นานเกิน STALE_MS จะเชื่อมใหม่เอง (คะแนนไม่หาย) */
 setInterval(()=>{if(P.st&&P.mode==='online'&&P.last&&Date.now()-P.last>CFG.STALE_MS){P.last=Date.now();Player.lost()}},2000);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden&&P.st&&P.mode==='online'){if(Net.conn&&Net.conn.open)Net.toHost({type:'hello',cid:P.cid});else Player.lost()}});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&P.st&&P.mode==='online'){if(Net.conn&&Net.conn.open)Net.toHost({type:'hello',cid:P.cid,pid:P.pid});else Player.lost()}});
 
 /* ================= INIT ================= */
 if(qs.get('room'))Player.start(true);else renderHome();
